@@ -156,9 +156,9 @@ func (g *Generator) ParseDefinition(i interface{}) (schema SchemaObj, err error)
 			typeDef.TypeName = typeName
 		}
 
-		//if len(typeDef.Properties) == 0 {
+		// if len(typeDef.Properties) == 0 {
 		//	typeDef.Ref = ""
-		//}
+		// }
 	case reflect.Slice, reflect.Array:
 		elemType := t.Elem()
 		if elemType.Kind() == reflect.Ptr {
@@ -451,21 +451,27 @@ func (g *Generator) ParseParameter(i interface{}) (name string, params []ParamOb
 	name = t.Name()
 	params = []ParamObj{}
 
-	for i := 0; i < t.NumField(); i = i + 1 {
-		field := t.Field(i)
-		// we can't access the value of un-exportable or anonymous fields
-		if field.PkgPath != "" || field.Anonymous {
-			continue
-		}
+	ForEachField(i, func(field reflect.StructField, value interface{}) bool {
+
+		// // we can't access the value of un-exportable or anonymous fields
+		// if field.PkgPath != "" || field.Anonymous {
+		// 	continue
+		// }
 
 		// don't check if it's omitted
 		var nameTag string
 
 		var inPath bool
-		if nameTag = field.Tag.Get("schema"); nameTag == "-" || nameTag == "" {
-			inPath = true
-			if nameTag = field.Tag.Get("path"); nameTag == "-" || nameTag == "" {
-				continue
+		if nameTag = field.Tag.Get("query"); nameTag == "-" || nameTag == "" {
+
+			if nameTag = field.Tag.Get("form"); nameTag == "-" || nameTag == "" {
+
+				if nameTag = field.Tag.Get("schema"); nameTag == "-" || nameTag == "" {
+					inPath = true
+					if nameTag = field.Tag.Get("path"); nameTag == "-" || nameTag == "" {
+						return true
+					}
+				}
 			}
 		}
 
@@ -486,10 +492,13 @@ func (g *Generator) ParseParameter(i interface{}) (name string, params []ParamOb
 			param.Description = descTag
 		}
 
-		if reqTag := field.Tag.Get("required"); reqTag == "-" || reqTag == "false" {
-			param.Required = false
-		} else {
+		binding := field.Tag.Get("binding")
+		bindings := strings.Split(binding, ";")
+
+		if len(binding) != 0 && Contains(bindings, "required") {
 			param.Required = true
+		} else {
+			param.Required = false
 		}
 
 		if inTag := field.Tag.Get("in"); inTag != "-" && inTag != "" {
@@ -531,7 +540,89 @@ func (g *Generator) ParseParameter(i interface{}) (name string, params []ParamOb
 		}
 
 		params = append(params, param)
-	}
+		return true
+	})
+	// for i := 0; i < t.NumField(); i = i + 1 {
+	// 	field := t.Field(i)
+	// 	// we can't access the value of un-exportable or anonymous fields
+	// 	if field.PkgPath != "" || field.Anonymous {
+	// 		continue
+	// 	}
+	//
+	// 	// don't check if it's omitted
+	// 	var nameTag string
+	//
+	// 	var inPath bool
+	// 	if nameTag = field.Tag.Get("schema"); nameTag == "-" || nameTag == "" {
+	// 		inPath = true
+	// 		if nameTag = field.Tag.Get("path"); nameTag == "-" || nameTag == "" {
+	// 			continue
+	// 		}
+	// 	}
+	//
+	// 	paramName := strings.Split(nameTag, ",")[0]
+	// 	param := ParamObj{}
+	// 	if g.reflectGoTypes {
+	// 		param.AddExtendedField("x-go-name", field.Name)
+	// 		param.AddExtendedField("x-go-type", goType(field.Type))
+	// 	}
+	//
+	// 	param.Name = paramName
+	//
+	// 	if e, isEnumer := reflect.Zero(field.Type).Interface().(enumer); isEnumer {
+	// 		param.Enum.Enum, param.Enum.EnumNames = e.GetEnumSlices()
+	// 	}
+	//
+	// 	if descTag := field.Tag.Get("description"); descTag != "-" && descTag != "" {
+	// 		param.Description = descTag
+	// 	}
+	//
+	// 	if reqTag := field.Tag.Get("required"); reqTag == "-" || reqTag == "false" {
+	// 		param.Required = false
+	// 	} else {
+	// 		param.Required = true
+	// 	}
+	//
+	// 	if inTag := field.Tag.Get("in"); inTag != "-" && inTag != "" {
+	// 		param.In = inTag // todo: validate IN value
+	// 	} else if inPath {
+	// 		param.In = "path"
+	// 	} else {
+	// 		param.In = "query"
+	// 	}
+	//
+	// 	var schema SchemaObj
+	// 	if swGenType := field.Tag.Get("swgen_type"); swGenType != "" {
+	// 		schema = SchemaFromCommonName(commonName(swGenType))
+	// 	} else {
+	// 		if mappedTo, ok := g.getMappedType(field.Type); ok {
+	// 			schema = g.genSchemaForType(reflect.TypeOf(mappedTo))
+	// 		} else {
+	// 			schema = g.genSchemaForType(field.Type)
+	// 		}
+	// 	}
+	//
+	// 	if schema.Type == "" {
+	// 		panic("dont support struct " + v.Type().Name() + " in property " + field.Name + " of parameter struct")
+	// 	}
+	//
+	// 	param.Type = schema.Type
+	// 	param.Format = schema.Format
+	//
+	// 	if schema.Type == "array" && schema.Items != nil {
+	// 		if schema.Items.Ref != "" || schema.Items.Type == "array" {
+	// 			panic("dont support array of struct or nested array in parameter")
+	// 		}
+	//
+	// 		param.Items = &ParamItemObj{
+	// 			Type:   schema.Items.Type,
+	// 			Format: schema.Items.Format,
+	// 		}
+	// 		param.CollectionFormat = "multi" // default for now
+	// 	}
+	//
+	// 	params = append(params, param)
+	// }
 
 	return
 }
@@ -539,6 +630,67 @@ func (g *Generator) ParseParameter(i interface{}) (name string, params []ParamOb
 // ParseParameter parse input struct to swagger parameter object
 func ParseParameter(i interface{}) (name string, params []ParamObj, err error) {
 	return gen.ParseParameter(i)
+}
+
+func ForEachField(o interface{}, f func(field reflect.StructField, value interface{}) bool) {
+	if o == nil {
+		return
+	}
+
+	v := reflect.ValueOf(o)
+
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	t := v.Type()
+
+	for i := 0; i < v.NumField(); i++ {
+		tf := t.Field(i)
+		vf := v.Field(i)
+
+		// 不包括私有字段（私有字段不在递归）
+		if !IsCapitalHeader(tf.Name) {
+			continue
+		}
+
+		if tf.Type.Kind() == reflect.Ptr {
+			if tf.Type.Elem().Kind() == reflect.Struct {
+				vok := reflect.New(tf.Type.Elem()).Interface()
+				ForEachField(vok, f)
+			}
+		} else if tf.Type.Kind() == reflect.Struct {
+			ForEachField(vf.Interface(), f)
+		}
+
+		success := f(tf, vf.Interface())
+		if !success {
+			return
+		}
+	}
+}
+
+// 是否为大写开头
+func IsCapitalHeader(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	head := s[:1]
+	t := []rune(head)
+	if t[0] >= 65 && t[0] < 91 {
+		return true
+	} else {
+		return false
+	}
+}
+
+func Contains(list []string, s string) bool {
+	for _, t := range list {
+		if t == s {
+			return true
+		}
+	}
+	return false
 }
 
 // ResetPaths remove all current paths
@@ -588,11 +740,11 @@ func (g *Generator) SetPathItem(info PathItemInfo, params interface{}, body inte
 		operationObj.Tags = []string{info.Tag}
 	}
 
-	operationObj.Security = make([]map[string][]string, 0)
+	operationObj.Security = make(map[string][]string)
 	if len(info.Security) > 0 {
 		for _, sec := range info.Security {
 			if _, ok := g.doc.SecurityDefinitions[sec]; ok {
-				operationObj.Security = append(operationObj.Security, map[string][]string{sec: {}})
+				operationObj.Security[sec] = []string{}
 			} else {
 				return errors.New("Undefined security definition: " + sec)
 			}
@@ -602,7 +754,7 @@ func (g *Generator) SetPathItem(info PathItemInfo, params interface{}, body inte
 	if len(info.SecurityOAuth2) > 0 {
 		for sec, scopes := range info.SecurityOAuth2 {
 			if _, ok := g.doc.SecurityDefinitions[sec]; ok {
-				operationObj.Security = append(operationObj.Security, map[string][]string{sec: scopes})
+				operationObj.Security[sec] = scopes
 			} else {
 				return errors.New("Undefined security definition: " + sec)
 			}
